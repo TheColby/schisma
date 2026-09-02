@@ -1,7 +1,7 @@
 use crate::{BackendKind, BatchProcessor, GpuError};
 use cudarc::{
-    driver::{CudaContext, CudaFunction, CudaStream, LaunchConfig, PushKernelArg},
-    nvrtc::{compile_ptx_with_opts, CompileOptions},
+    driver::{self, CudaContext, CudaFunction, CudaStream, LaunchConfig, PushKernelArg},
+    nvrtc::{self, compile_ptx_with_opts, CompileOptions},
 };
 use std::sync::Arc;
 
@@ -33,6 +33,12 @@ impl CudaProcessor {
             return Err(GpuError::Unavailable {
                 backend: BackendKind::Cuda,
                 reason: "NVIDIA does not provide a CUDA runtime for current macOS systems".into(),
+            });
+        }
+        if !cuda_library_present() {
+            return Err(GpuError::Unavailable {
+                backend: BackendKind::Cuda,
+                reason: "CUDA driver library or NVRTC compiler could not be loaded".into(),
             });
         }
         let context = std::panic::catch_unwind(|| CudaContext::new(0))
@@ -81,6 +87,12 @@ impl CudaProcessor {
             device_name,
         })
     }
+}
+
+fn cuda_library_present() -> bool {
+    // SAFETY: cudarc's probes only attempt to open and immediately close the
+    // platform's candidate CUDA libraries; no symbols or foreign values escape.
+    unsafe { driver::sys::is_culib_present() && nvrtc::sys::is_culib_present() }
 }
 
 impl BatchProcessor for CudaProcessor {
