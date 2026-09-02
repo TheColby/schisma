@@ -145,10 +145,7 @@ impl AnalysisWorker {
                         let mut conditioned = vec![0.0_f32; flat.len()];
                         let result = accelerator.condition(&flat, &mut conditioned, 1.0, 1.0);
                         let frames: Vec<[f32; 2]> = if result.is_ok() {
-                            conditioned
-                                .chunks_exact(2)
-                                .map(|frame| [frame[0], frame[1]])
-                                .collect()
+                            conditioned.as_chunks::<2>().0.to_vec()
                         } else {
                             source_frames
                         };
