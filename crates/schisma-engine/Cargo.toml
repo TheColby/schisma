@@ -1,0 +1,27 @@
+[package]
+name = "schisma-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+schisma-audio-io = { workspace = true, features = ["realtime"] }
+schisma-midi = { workspace = true, features = ["realtime"] }
+schisma-tuning.workspace = true
+hound.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[[bin]]
+name = "schisma-render"
+path = "src/bin/render.rs"
+
+[[bin]]
+name = "schisma-live"
+path = "src/bin/live.rs"
+
+[lints]
+workspace = true
+

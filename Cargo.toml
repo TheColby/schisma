@@ -1,0 +1,41 @@
+[workspace]
+members = [
+    "crates/schisma-audio-io",
+    "crates/schisma-engine",
+    "crates/schisma-midi",
+    "crates/schisma-tuning",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Schisma contributors"]
+license = "MIT"
+repository = "https://github.com/schisma-synth/schisma"
+rust-version = "1.81"
+
+[workspace.dependencies]
+schisma-audio-io = { path = "crates/schisma-audio-io" }
+schisma-engine = { path = "crates/schisma-engine" }
+schisma-midi = { path = "crates/schisma-midi" }
+schisma-tuning = { path = "crates/schisma-tuning" }
+
+cpal = "0.15"
+hound = "3.5"
+midir = "0.10"
+midly = "0.5"
+ringbuf = "0.4"
+sha2 = "0.10"
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"

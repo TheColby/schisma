@@ -1,0 +1,21 @@
+[package]
+name = "schisma-midi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+realtime = ["dep:midir", "dep:ringbuf"]
+
+[dependencies]
+midly.workspace = true
+thiserror.workspace = true
+midir = { workspace = true, optional = true }
+ringbuf = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
