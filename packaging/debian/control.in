@@ -1,0 +1,13 @@
+Package: schisma
+Version: @VERSION@
+Section: sound
+Priority: optional
+Architecture: @ARCHITECTURE@
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: Schisma contributors <schisma@users.noreply.github.com>
+Depends: libasound2t64 | libasound2, libudev1, libx11-6, libxi6, libwayland-client0, libxkbcommon0, libvulkan1
+Homepage: https://github.com/TheColby/schisma
+Description: Standalone controller-first MPE software synthesizer
+ Schisma is a stereo physical-modeling instrument with per-note MPE
+ expression, Scala and KBM microtonal tuning, a graphical topology editor,
+ professional metering, and CUDA, Metal, and CPU batch-compute backends.

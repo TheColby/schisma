@@ -8,11 +8,19 @@ use schisma_tuning::ScalaTuning;
 
 const CONTROL_INTERVAL_FRAMES: u64 = 16;
 
+/// Lowest sample rate accepted by the synthesis engine.
+pub const MIN_SUPPORTED_SAMPLE_RATE_HZ: u32 = 8_000;
+/// Highest sample rate accepted by the synthesis engine.
+pub const MAX_SUPPORTED_SAMPLE_RATE_HZ: u32 = 384_000;
+/// The engine's fixed output channel count.
+pub const OUTPUT_CHANNELS: usize = 2;
+
 #[derive(Debug, Clone, Copy)]
 pub struct M0Config {
     pub sample_rate: f64,
     pub max_voices: usize,
     pub base_morph: f32,
+    pub master_gain: f32,
     pub zone: ZoneConfig,
 }
 
@@ -22,6 +30,7 @@ impl Default for M0Config {
             sample_rate: 48_000.0,
             max_voices: 16,
             base_morph: 0.5,
+            master_gain: 1.0,
             zone: ZoneConfig::lower(15),
         }
     }
@@ -39,8 +48,11 @@ pub struct M0Engine {
 
 impl M0Engine {
     pub fn new(config: M0Config, tuning: ScalaTuning) -> Result<Self, M0EngineError> {
-        if !config.sample_rate.is_finite() || config.sample_rate <= 0.0 {
-            return Err(M0EngineError::InvalidSampleRate(config.sample_rate));
+        if !config.sample_rate.is_finite()
+            || config.sample_rate < f64::from(MIN_SUPPORTED_SAMPLE_RATE_HZ)
+            || config.sample_rate > f64::from(MAX_SUPPORTED_SAMPLE_RATE_HZ)
+        {
+            return Err(M0EngineError::UnsupportedSampleRate(config.sample_rate));
         }
         if config.max_voices == 0 {
             return Err(M0EngineError::InvalidVoiceCount);
@@ -68,6 +80,22 @@ impl M0Engine {
 
     pub fn voices(&self) -> &[crate::mpe::VoiceState] {
         self.voices.voices()
+    }
+
+    pub fn base_morph(&self) -> f32 {
+        self.config.base_morph
+    }
+
+    pub fn set_base_morph(&mut self, morph: f32) {
+        self.config.base_morph = morph.clamp(0.0, 1.0);
+    }
+
+    pub fn master_gain(&self) -> f32 {
+        self.config.master_gain
+    }
+
+    pub fn set_master_gain(&mut self, gain: f32) {
+        self.config.master_gain = gain.clamp(0.0, 1.5);
     }
 
     /// Process one block. Events must be sorted by `frame_offset`.
@@ -109,8 +137,8 @@ impl M0Engine {
                 }
             }
 
-            frame_output[0] = (frame_output[0] * 0.72).tanh();
-            frame_output[1] = (frame_output[1] * 0.72).tanh();
+            frame_output[0] = (frame_output[0] * 0.72 * self.config.master_gain).tanh();
+            frame_output[1] = (frame_output[1] * 0.72 * self.config.master_gain).tanh();
         }
 
         self.frame += output.len() as u64;
@@ -142,8 +170,10 @@ impl M0Engine {
 
 #[derive(Debug, thiserror::Error)]
 pub enum M0EngineError {
-    #[error("invalid sample rate {0}")]
-    InvalidSampleRate(f64),
+    #[error(
+        "unsupported sample rate {0}; expected {MIN_SUPPORTED_SAMPLE_RATE_HZ}..={MAX_SUPPORTED_SAMPLE_RATE_HZ} Hz"
+    )]
+    UnsupportedSampleRate(f64),
     #[error("max voice count must be greater than zero")]
     InvalidVoiceCount,
 }
@@ -268,5 +298,31 @@ x
         reset_audio_allocation_count();
         engine.process_block(&events, &mut output);
         assert_eq!(audio_allocation_count(), 0);
+    }
+
+    #[test]
+    fn engine_renders_finite_stereo_at_384_khz() {
+        let config = M0Config {
+            sample_rate: f64::from(MAX_SUPPORTED_SAMPLE_RATE_HZ),
+            ..M0Config::default()
+        };
+        let mut engine = M0Engine::new(config, default_twelve_tet_tuning()).unwrap();
+        let mut output = vec![[0.0; OUTPUT_CHANNELS]; 512];
+        engine.process_block(&[note(0, 2, 60, 0.8, true)], &mut output);
+
+        assert!(output.iter().flatten().all(|sample| sample.is_finite()));
+        assert!(output.iter().flatten().any(|sample| *sample != 0.0));
+    }
+
+    #[test]
+    fn engine_rejects_sample_rates_above_384_khz() {
+        let config = M0Config {
+            sample_rate: f64::from(MAX_SUPPORTED_SAMPLE_RATE_HZ) + 1.0,
+            ..M0Config::default()
+        };
+        assert!(matches!(
+            M0Engine::new(config, default_twelve_tet_tuning()),
+            Err(M0EngineError::UnsupportedSampleRate(_))
+        ));
     }
 }

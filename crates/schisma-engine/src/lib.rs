@@ -10,7 +10,10 @@ pub mod mpe;
 pub mod rt_audit;
 pub mod telemetry;
 
-pub use engine::{default_twelve_tet_tuning, M0Config, M0Engine};
+pub use engine::{
+    default_twelve_tet_tuning, M0Config, M0Engine, MAX_SUPPORTED_SAMPLE_RATE_HZ,
+    MIN_SUPPORTED_SAMPLE_RATE_HZ, OUTPUT_CHANNELS,
+};
 pub use mpe::{MpeVoiceManager, VoicePhase, VoiceState, ZoneConfig};
 
 #[cfg(test)]

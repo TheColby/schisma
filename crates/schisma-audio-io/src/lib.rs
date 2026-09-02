@@ -5,4 +5,4 @@
 
 pub mod hardware;
 
-pub use hardware::{HardwareConfig, HardwareError, HardwareHost};
+pub use hardware::{HardwareConfig, HardwareError, HardwareHost, HardwareStream};

@@ -1,0 +1,15 @@
+[package]
+name = "schisma-graph"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+schisma-params.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

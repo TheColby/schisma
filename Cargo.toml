@@ -1,8 +1,13 @@
 [workspace]
 members = [
+    "crates/schisma-analysis",
+    "crates/schisma-app",
     "crates/schisma-audio-io",
     "crates/schisma-engine",
+    "crates/schisma-gpu",
+    "crates/schisma-graph",
     "crates/schisma-midi",
+    "crates/schisma-params",
     "crates/schisma-tuning",
 ]
 resolver = "2"
@@ -12,22 +17,33 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Schisma contributors"]
 license = "MIT"
-repository = "https://github.com/schisma-synth/schisma"
-rust-version = "1.81"
+repository = "https://github.com/TheColby/schisma"
+rust-version = "1.92"
 
 [workspace.dependencies]
+schisma-analysis = { path = "crates/schisma-analysis" }
 schisma-audio-io = { path = "crates/schisma-audio-io" }
 schisma-engine = { path = "crates/schisma-engine" }
+schisma-gpu = { path = "crates/schisma-gpu" }
+schisma-graph = { path = "crates/schisma-graph" }
 schisma-midi = { path = "crates/schisma-midi" }
+schisma-params = { path = "crates/schisma-params" }
 schisma-tuning = { path = "crates/schisma-tuning" }
 
+bytemuck = { version = "1.25", features = ["derive"] }
 cpal = "0.15"
+eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "persistence", "wgpu", "wayland", "x11"] }
 hound = "3.5"
 midir = "0.10"
 midly = "0.5"
+pollster = "0.4"
+realfft = "3.5"
 ringbuf = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
+wgpu = { version = "29", default-features = false, features = ["dx12", "metal", "std", "vulkan", "wgsl"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

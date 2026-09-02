@@ -1,6 +1,9 @@
 use schisma_audio_io::hardware::{HardwareConfig, HardwareHost};
 use schisma_engine::rt_audit::AuditAllocator;
-use schisma_engine::{default_twelve_tet_tuning, M0Config, M0Engine};
+use schisma_engine::{
+    default_twelve_tet_tuning, M0Config, M0Engine, MAX_SUPPORTED_SAMPLE_RATE_HZ,
+    MIN_SUPPORTED_SAMPLE_RATE_HZ, OUTPUT_CHANNELS,
+};
 use schisma_midi::realtime::RealtimeMidiHost;
 use schisma_midi::MidiEvent;
 use schisma_tuning::ScalaTuning;
@@ -57,7 +60,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let hardware = HardwareHost::new(HardwareConfig {
         device_name: options.audio_device,
-        n_channels: 2,
+        n_channels: OUTPUT_CHANNELS,
         sample_rate: f64::from(options.sample_rate),
         block_size: options.block_size,
         ..HardwareConfig::default()
@@ -86,15 +89,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         let mut first_chunk = true;
-        for output_chunk in interleaved.chunks_mut(options.block_size * 2) {
-            let frame_count = output_chunk.len() / 2;
+        for output_chunk in interleaved.chunks_mut(options.block_size * OUTPUT_CHANNELS) {
+            let frame_count = output_chunk.len() / OUTPUT_CHANNELS;
             if frame_count == 0 {
                 continue;
             }
             let block_events = if first_chunk { events.as_slice() } else { &[] };
             engine.process_block(block_events, &mut scratch[..frame_count]);
             for (target, stereo) in output_chunk
-                .chunks_exact_mut(2)
+                .chunks_exact_mut(OUTPUT_CHANNELS)
                 .zip(&scratch[..frame_count])
             {
                 target[0] = stereo[0];
@@ -125,8 +128,16 @@ fn parse_options() -> Result<Options, Box<dyn Error>> {
             unknown => return Err(format!("unknown option '{unknown}'").into()),
         }
     }
-    if options.sample_rate == 0 || options.block_size == 0 {
-        return Err("sample rate and block size must be greater than zero".into());
+    if !(MIN_SUPPORTED_SAMPLE_RATE_HZ..=MAX_SUPPORTED_SAMPLE_RATE_HZ).contains(&options.sample_rate)
+    {
+        return Err(format!(
+            "sample rate must be between {MIN_SUPPORTED_SAMPLE_RATE_HZ} and \
+             {MAX_SUPPORTED_SAMPLE_RATE_HZ} Hz"
+        )
+        .into());
+    }
+    if options.block_size == 0 {
+        return Err("block size must be greater than zero".into());
     }
     if options.kbm.is_some() && options.scl.is_none() {
         return Err("--kbm requires --scl".into());
@@ -153,8 +164,11 @@ fn print_help() {
                --audio NAME        Audio output; system default by default\n\
                --scl PATH          Optional Scala scale\n\
                --kbm PATH          Optional Scala keyboard mapping\n\
-               --sample-rate HZ    Sample rate (default: 48000)\n\
-               --block-size FRAMES Callback size (default: 128)"
+               --sample-rate HZ    8000..384000 (default: 48000)\n\
+               --block-size FRAMES Callback size (default: 128)\n\
+         \n\
+         The live stream is always stereo 32-bit float. Hardware must support\n\
+         the requested sample rate."
     );
 }
 

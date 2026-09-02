@@ -22,3 +22,24 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  gpu-features:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: cpu-only
+            features: ""
+          - name: metal
+            features: "--features metal"
+          - name: cuda-11
+            features: "--features cuda,cuda-11"
+          - name: cuda-12
+            features: "--features cuda,cuda-12"
+          - name: cuda-13
+            features: "--features cuda,cuda-13"
+    name: GPU feature — ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile backend variant
+        run: cargo check -p schisma-gpu --no-default-features ${{ matrix.features }}

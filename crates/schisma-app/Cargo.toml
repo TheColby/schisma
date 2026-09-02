@@ -1,0 +1,27 @@
+[package]
+name = "schisma-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+schisma-analysis.workspace = true
+schisma-audio-io = { workspace = true, features = ["realtime"] }
+schisma-engine.workspace = true
+schisma-gpu.workspace = true
+schisma-graph.workspace = true
+schisma-midi = { workspace = true, features = ["realtime"] }
+schisma-params.workspace = true
+schisma-tuning.workspace = true
+eframe.workspace = true
+ringbuf.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "schisma"
+path = "src/main.rs"
+
+[lints]
+workspace = true

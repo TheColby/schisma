@@ -1,0 +1,52 @@
+name: Packages
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  debian:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config dpkg-dev desktop-file-utils libasound2-dev libudev-dev libx11-dev libxi-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev libvulkan-dev
+      - name: Build Debian package
+        run: ./scripts/package_debian.sh
+      - name: Inspect Debian package
+        run: |
+          desktop-file-validate packaging/linux/org.schisma.synth.desktop
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+      - name: Install Debian package with APT
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          schisma-render --help
+          schisma-gpu-info
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schisma-debian
+          path: dist/*.deb
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Validate Homebrew formula
+        run: |
+          ruby -c Formula/schisma.rb
+          brew style Formula/schisma.rb
+      - name: Build app bundle
+        run: ./scripts/package_macos.sh
+      - name: Archive app bundle
+        run: tar -C dist -czf dist/Schisma-macos.tar.gz Schisma.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: schisma-macos
+          path: dist/Schisma-macos.tar.gz

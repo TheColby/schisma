@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Schisma
+GenericName=MPE Software Synthesizer
+Comment=Per-note physical-modeling instrument
+Exec=schisma
+Icon=org.schisma.synth
+Terminal=false
+Categories=AudioVideo;Audio;Midi;
+Keywords=synthesizer;MPE;MIDI;microtonal;music;audio;
+StartupNotify=true
+StartupWMClass=schisma

@@ -1,0 +1,25 @@
+[package]
+name = "schisma-gpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["cuda", "cuda-12", "metal"]
+cuda = ["dep:cudarc"]
+cuda-11 = ["cuda", "cudarc/cuda-11080"]
+cuda-12 = ["cuda", "cudarc/cuda-12000"]
+cuda-13 = ["cuda", "cudarc/cuda-13000"]
+metal = ["dep:bytemuck", "dep:pollster", "dep:wgpu"]
+
+[dependencies]
+bytemuck = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
+thiserror.workspace = true
+wgpu = { workspace = true, optional = true }
+cudarc = { version = "0.19.9", optional = true, default-features = false, features = ["std", "driver", "nvrtc", "fallback-dynamic-loading"] }
+
+[lints]
+workspace = true
