@@ -287,7 +287,9 @@ impl AudioRuntime {
                     let block_events = if first_chunk { events.as_slice() } else { &[] };
                     engine.process_block(block_events, &mut scratch[..frames]);
                     for (target, stereo) in chunk
-                        .chunks_exact_mut(OUTPUT_CHANNELS)
+                        .as_chunks_mut::<OUTPUT_CHANNELS>()
+                        .0
+                        .iter_mut()
                         .zip(&scratch[..frames])
                     {
                         target[0] = stereo[0];
