@@ -1,6 +1,6 @@
 //! Fixed-topology M0 synthesis engine.
 
-use crate::dsp::{M0VoiceDsp, WavetableBank};
+use crate::dsp::{M0VoiceDsp, MorphProfile, WavetableBank};
 use crate::mpe::{MpeVoiceManager, VoicePhase, ZoneConfig};
 use crate::rt_audit::AudioThreadGuard;
 use schisma_midi::{MidiEvent, MidiEventKind};
@@ -20,6 +20,7 @@ pub struct M0Config {
     pub sample_rate: f64,
     pub max_voices: usize,
     pub base_morph: f32,
+    pub key_morph_spread: f32,
     pub master_gain: f32,
     pub zone: ZoneConfig,
 }
@@ -30,6 +31,7 @@ impl Default for M0Config {
             sample_rate: 48_000.0,
             max_voices: 16,
             base_morph: 0.5,
+            key_morph_spread: 0.46,
             master_gain: 1.0,
             zone: ZoneConfig::lower(15),
         }
@@ -90,6 +92,14 @@ impl M0Engine {
         self.config.base_morph = morph.clamp(0.0, 1.0);
     }
 
+    pub fn key_morph_spread(&self) -> f32 {
+        self.config.key_morph_spread
+    }
+
+    pub fn set_key_morph_spread(&mut self, spread: f32) {
+        self.config.key_morph_spread = spread.clamp(0.0, 1.0);
+    }
+
     pub fn master_gain(&self) -> f32 {
         self.config.master_gain
     }
@@ -126,7 +136,10 @@ impl M0Engine {
                     &voice,
                     &self.tables,
                     self.base_frequencies[slot],
-                    self.config.base_morph,
+                    MorphProfile {
+                        base: self.config.base_morph,
+                        key_spread: self.config.key_morph_spread,
+                    },
                     self.config.sample_rate,
                     update_control,
                 );

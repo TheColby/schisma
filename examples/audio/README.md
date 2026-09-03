@@ -2,7 +2,8 @@
 
 Each file is a deterministic four-second, 48 kHz stereo float WAV rendered by
 `schisma-render`. The WAV files are intentionally ignored by Git; regenerate
-them locally with the commands below.
+them locally with the commands below. Every factory study inherits Schisma's
+key-specific morph contour before its independent MPE timbre gestures are added.
 
 | File | Study |
 | --- | --- |

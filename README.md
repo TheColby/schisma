@@ -14,7 +14,7 @@ The current vertical slice provides:
   release, RPN pitch-bend ranges, and poly-pressure fallback;
 - a fixed wavetable → energy morph → 16-mode resonator → TPT low-pass chain;
 - per-note pitch, pressure, CC74 timbre, velocity, release velocity, stereo
-  position, and release-tail handling;
+  position, release-tail handling, and a pronounced key-specific morph contour;
 - Scala `.scl` plus complete `.kbm` mapping, EDO, and rational JI tuning;
 - a lock-free realtime MIDI queue with note-off-preserving overflow behavior;
 - live CPAL audio/MIDI operation and deterministic offline WAV rendering;
@@ -92,6 +92,13 @@ Schisma starts the system audio output and first available MIDI input. The
 on-screen keys work without a controller; MPE input adds independent pitch,
 pressure, and CC74 timbre per note. Audio and MIDI/MPE devices can both be
 selected in the Audio & GPU settings window.
+
+The default instrument and all ten built-in sound studies start with a 46%
+key-morph spread. An asymmetric pitch-class contour gives adjacent keys
+different material character, while register adds a slower large-scale shift;
+velocity, pressure, pitch bend, and CC74 remain fully per-note and expressive.
+The engine exposes the spread independently, including zero for the original
+global-morph response.
 
 On macOS, build a standalone app bundle with:
 

@@ -10,6 +10,19 @@ const MODE_RATIOS: [f64; MODE_COUNT] = [
     25.37,
 ];
 
+// A deliberately asymmetric twelve-key contour gives neighboring notes their
+// own physical identity instead of turning keyboard position into a plain
+// brightness ramp. Register position supplies the slower large-scale motion.
+const KEY_MORPH_CONTOUR: [f32; 12] = [
+    -0.72, 0.48, -0.25, 0.78, -0.52, 0.12, 0.92, -0.18, 0.58, -0.84, 0.30, 0.70,
+];
+
+#[derive(Clone, Copy)]
+pub struct MorphProfile {
+    pub base: f32,
+    pub key_spread: f32,
+}
+
 pub struct WavetableBank {
     sine: [f32; WAVETABLE_SIZE],
     bright: [f32; WAVETABLE_SIZE],
@@ -219,7 +232,7 @@ impl M0VoiceDsp {
         voice: &VoiceState,
         tables: &WavetableBank,
         base_frequency_hz: f64,
-        base_morph: f32,
+        morph_profile: MorphProfile,
         sample_rate: f64,
         update_control: bool,
     ) -> [f32; 2] {
@@ -255,7 +268,12 @@ impl M0VoiceDsp {
         self.rng ^= self.rng << 17;
         let noise = ((self.rng >> 32) as u32 as f32 / u32::MAX as f32) * 2.0 - 1.0;
 
-        let morph = (base_morph + (self.smoothed_timbre - 0.5) * 0.85).clamp(0.0, 1.0);
+        let morph = effective_morph(
+            morph_profile.base,
+            self.smoothed_timbre,
+            voice.note,
+            morph_profile.key_spread,
+        );
         let excitation = oscillator * (0.025 + 0.22 * morph) + noise * 0.012 * morph + self.impulse;
         self.impulse = 0.0;
 
@@ -322,8 +340,52 @@ impl M0VoiceDsp {
     }
 }
 
+fn effective_morph(base_morph: f32, timbre: f32, note: u8, key_spread: f32) -> f32 {
+    let register = ((f32::from(note) - 60.0) / 48.0).clamp(-1.0, 1.0);
+    let key_identity = KEY_MORPH_CONTOUR[usize::from(note % 12)];
+    let identity = (register * 0.60 + key_identity * 0.40).clamp(-1.0, 1.0);
+    let key_target = 0.5 + identity * 0.5;
+    let expressive = (base_morph + (timbre - 0.5) * 0.85).clamp(0.0, 1.0);
+    expressive + (key_target - expressive) * key_spread.clamp(0.0, 1.0)
+}
+
 impl Default for M0VoiceDsp {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_key_spread_gives_neighboring_notes_distinct_morphs() {
+        let morphs: Vec<_> = (60..72)
+            .map(|note| effective_morph(0.5, 0.5, note, 0.46))
+            .collect();
+        assert!(morphs
+            .windows(2)
+            .all(|pair| (pair[0] - pair[1]).abs() > 0.035));
+        assert!(morphs.iter().all(|morph| (0.0..=1.0).contains(morph)));
+    }
+
+    #[test]
+    fn zero_key_spread_preserves_the_global_and_mpe_morph() {
+        let expected = 0.5 + (0.7 - 0.5) * 0.85;
+        for note in 0..=127 {
+            assert!((effective_morph(0.5, 0.7, note, 0.0) - expected).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn key_identity_survives_factory_morph_extremes() {
+        let high_c = effective_morph(0.96, 0.98, 84, 0.46);
+        let high_c_sharp = effective_morph(0.96, 0.98, 85, 0.46);
+        let low_c = effective_morph(0.06, 0.10, 48, 0.46);
+        let low_c_sharp = effective_morph(0.06, 0.10, 49, 0.46);
+
+        assert!((high_c - high_c_sharp).abs() > 0.08);
+        assert!((low_c - low_c_sharp).abs() > 0.08);
     }
 }
