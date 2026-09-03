@@ -1,11 +1,14 @@
-//! Non-realtime spectrum, level, loudness, and stereo-correlation analysis.
+//! Non-realtime spectrum, level, loudness, stereo-correlation, and phase analysis.
 
 use realfft::{num_complex::Complex32, RealFftPlanner, RealToComplex};
 use std::sync::Arc;
 
+const SCOPE_TRACE_POINTS: usize = 512;
+
 #[derive(Debug, Clone)]
 pub struct AnalysisSnapshot {
     pub spectrum_db: Vec<f32>,
+    pub scope_trace: Vec<[f32; 2]>,
     pub peak_dbfs: [f32; 2],
     pub rms_dbfs: [f32; 2],
     pub momentary_lufs: f32,
@@ -16,6 +19,7 @@ impl AnalysisSnapshot {
     pub fn silence(spectrum_bins: usize) -> Self {
         Self {
             spectrum_db: vec![-120.0; spectrum_bins],
+            scope_trace: Vec::new(),
             peak_dbfs: [-120.0; 2],
             rms_dbfs: [-120.0; 2],
             momentary_lufs: -120.0,
@@ -97,6 +101,15 @@ impl Analyzer {
             .iter()
             .map(|bin| amplitude_db(bin.norm() * normalization))
             .collect();
+        let scope_step = frames.len().div_ceil(SCOPE_TRACE_POINTS).max(1);
+        let scope_span = scope_step.saturating_mul(SCOPE_TRACE_POINTS);
+        let scope_offset = frames.len().saturating_sub(scope_span);
+        let scope_trace = frames[scope_offset..]
+            .iter()
+            .step_by(scope_step)
+            .take(SCOPE_TRACE_POINTS)
+            .copied()
+            .collect();
         let count = frames.len().max(1) as f64;
         let rms = [
             (sums[0] / count).sqrt() as f32,
@@ -112,6 +125,7 @@ impl Analyzer {
 
         AnalysisSnapshot {
             spectrum_db,
+            scope_trace,
             peak_dbfs: [amplitude_db(peaks[0]), amplitude_db(peaks[1])],
             rms_dbfs: [amplitude_db(rms[0]), amplitude_db(rms[1])],
             // BS.1770's absolute calibration offset. Full K-weighting and
@@ -154,5 +168,20 @@ mod tests {
             })
             .collect();
         assert!(analyzer.analyze(&frames).stereo_correlation < -0.999);
+    }
+
+    #[test]
+    fn scope_trace_is_bounded_and_preserves_stereo_samples() {
+        let mut analyzer = Analyzer::new(48_000.0, 1024);
+        let frames: Vec<_> = (0..4096)
+            .map(|index| [index as f32 / 4096.0, -(index as f32) / 4096.0])
+            .collect();
+        let snapshot = analyzer.analyze(&frames);
+
+        assert_eq!(snapshot.scope_trace.len(), SCOPE_TRACE_POINTS);
+        assert!(snapshot
+            .scope_trace
+            .iter()
+            .all(|frame| (frame[0] + frame[1]).abs() < f32::EPSILON));
     }
 }

@@ -16,6 +16,7 @@ const VERSION: &str = "v0.1.0";
 const WATERFALL_BINS: usize = 112;
 const WATERFALL_FRAMES: usize = 64;
 const WATERFALL_CAPTURE_INTERVAL: Duration = Duration::from_millis(42);
+const CORRELATION_MEMORY: usize = 180;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MainView {
@@ -32,6 +33,7 @@ pub struct SchismaApp {
     selected_node: Option<NodeId>,
     pending_connection: Option<NodeId>,
     waterfall_history: VecDeque<Vec<f32>>,
+    correlation_history: VecDeque<f32>,
     last_waterfall_capture: Instant,
     canvas_pan: Vec2,
     canvas_zoom: f32,
@@ -72,6 +74,7 @@ impl SchismaApp {
             selected_node: None,
             pending_connection: None,
             waterfall_history: VecDeque::with_capacity(WATERFALL_FRAMES),
+            correlation_history: VecDeque::with_capacity(CORRELATION_MEMORY),
             last_waterfall_capture: Instant::now() - WATERFALL_CAPTURE_INTERVAL,
             canvas_pan: egui::vec2(30.0, 70.0),
             canvas_zoom: 0.82,
@@ -143,6 +146,11 @@ impl SchismaApp {
                     self.waterfall_history.pop_front();
                 }
                 self.last_waterfall_capture = Instant::now();
+            }
+            self.correlation_history
+                .push_back(snapshot.analysis.stereo_correlation);
+            while self.correlation_history.len() > CORRELATION_MEMORY {
+                self.correlation_history.pop_front();
             }
             self.last_snapshot = Some(snapshot);
         }
@@ -784,8 +792,8 @@ impl SchismaApp {
     fn bottom_analysis(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("analysis")
             .resizable(true)
-            .default_size(225.0)
-            .size_range(150.0..=360.0)
+            .default_size(252.0)
+            .size_range(190.0..=420.0)
             .frame(
                 egui::Frame::new()
                     .fill(theme::PANEL)
@@ -797,9 +805,13 @@ impl SchismaApp {
                     .as_ref()
                     .map(|snapshot| &snapshot.analysis)
                     .unwrap_or(&self.silence);
+                let sample_rate = self
+                    .last_snapshot
+                    .as_ref()
+                    .map_or(self.sample_rate, |snapshot| snapshot.sample_rate);
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new("ANALYSIS")
+                        egui::RichText::new("STEREO FIELD")
                             .strong()
                             .small()
                             .color(theme::MUTED),
@@ -823,10 +835,25 @@ impl SchismaApp {
                 ui.add_space(4.0);
                 let visual_height = ui.available_height().max(72.0);
                 ui.horizontal(|ui| {
-                    let meter_width = 52.0;
-                    let spectrum_width =
-                        (ui.available_width() - meter_width * 3.0 - 34.0).max(260.0);
-                    spectrum(ui, analysis, egui::vec2(spectrum_width, visual_height));
+                    let gaps = ui.spacing().item_spacing.x * 4.0;
+                    let plot_budget = (ui.available_width() - 68.0 - gaps).max(480.0);
+                    let square_side = visual_height.min((plot_budget - 360.0).max(96.0)).max(96.0);
+                    let remaining_width = (plot_budget - square_side).max(360.0);
+                    let time_width = remaining_width * 0.54;
+                    let correlometer_width = remaining_width - time_width;
+                    lissajous_scope(ui, analysis, egui::vec2(square_side, square_side));
+                    time_domain_scope(
+                        ui,
+                        analysis,
+                        sample_rate,
+                        egui::vec2(time_width, visual_height),
+                    );
+                    spatial_correlometer(
+                        ui,
+                        analysis,
+                        &self.correlation_history,
+                        egui::vec2(correlometer_width, visual_height),
+                    );
                     level_meter(
                         ui,
                         "L",
@@ -841,7 +868,6 @@ impl SchismaApp {
                         analysis.rms_dbfs[1],
                         visual_height,
                     );
-                    correlation_meter(ui, analysis.stereo_correlation, visual_height);
                 });
             });
     }
@@ -1284,37 +1310,445 @@ fn voice_monitor(ui: &mut egui::Ui, snapshot: &RuntimeSnapshot) {
         });
 }
 
-fn spectrum(ui: &mut egui::Ui, analysis: &AnalysisSnapshot, size: Vec2) {
+fn lissajous_scope(ui: &mut egui::Ui, analysis: &AnalysisSnapshot, size: Vec2) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 5.0, theme::BG);
-    for division in 1..5 {
-        let y = egui::lerp(rect.y_range(), division as f32 / 5.0);
-        painter.line_segment(
-            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            Stroke::new(1.0, theme::GRID),
-        );
-    }
-    if analysis.spectrum_db.len() > 1 {
-        let points: Vec<_> = analysis
-            .spectrum_db
-            .iter()
-            .enumerate()
-            .map(|(index, db)| {
-                let normalized = index as f32 / (analysis.spectrum_db.len() - 1) as f32;
-                let x = rect.left() + normalized.sqrt() * rect.width();
-                let y = rect.bottom() - ((*db + 100.0) / 100.0).clamp(0.0, 1.0) * rect.height();
-                egui::pos2(x, y)
-            })
-            .collect();
-        painter.add(egui::Shape::line(points, Stroke::new(1.8, theme::CYAN)));
-    }
+    painter.rect_filled(rect, 6.0, theme::BG);
+    painter.rect_stroke(
+        rect,
+        6.0,
+        Stroke::new(1.0, theme::GRID),
+        egui::StrokeKind::Inside,
+    );
     painter.text(
         rect.left_top() + egui::vec2(8.0, 6.0),
         egui::Align2::LEFT_TOP,
-        "SPECTRUM  20 Hz — NYQUIST",
+        "LISSAJOUS  ·  M/S",
         FontId::monospace(9.0),
         theme::MUTED,
+    );
+
+    let plot = Rect::from_min_max(
+        rect.min + egui::vec2(24.0, 27.0),
+        rect.max - egui::vec2(24.0, 19.0),
+    );
+    let center = plot.center();
+    let radius = plot.width().min(plot.height()) * 0.45;
+    painter.circle_stroke(center, radius, Stroke::new(1.0, theme::GRID));
+    painter.line_segment(
+        [
+            egui::pos2(center.x - radius, center.y),
+            egui::pos2(center.x + radius, center.y),
+        ],
+        Stroke::new(1.0, theme::GRID),
+    );
+    painter.line_segment(
+        [
+            egui::pos2(center.x, center.y - radius),
+            egui::pos2(center.x, center.y + radius),
+        ],
+        Stroke::new(1.0, theme::GRID),
+    );
+    for scale in [0.25_f32, 0.5, 0.75] {
+        painter.circle_stroke(
+            center,
+            radius * scale,
+            Stroke::new(0.6, theme::GRID.gamma_multiply(0.72)),
+        );
+    }
+    painter.text(
+        egui::pos2(center.x, plot.top()),
+        egui::Align2::CENTER_TOP,
+        "MONO",
+        FontId::monospace(8.0),
+        theme::MUTED,
+    );
+    painter.text(
+        egui::pos2(plot.left(), center.y),
+        egui::Align2::LEFT_CENTER,
+        "−S",
+        FontId::monospace(8.0),
+        theme::MUTED,
+    );
+    painter.text(
+        egui::pos2(plot.right(), center.y),
+        egui::Align2::RIGHT_CENTER,
+        "+S",
+        FontId::monospace(8.0),
+        theme::MUTED,
+    );
+
+    if analysis.scope_trace.len() > 1 {
+        let projection_peak = analysis
+            .scope_trace
+            .iter()
+            .map(|frame| {
+                let mid = (frame[0] + frame[1]) * std::f32::consts::FRAC_1_SQRT_2;
+                let side = (frame[1] - frame[0]) * std::f32::consts::FRAC_1_SQRT_2;
+                mid.abs().max(side.abs())
+            })
+            .fold(0.0_f32, f32::max)
+            .max(0.08);
+        let gain = radius / projection_peak;
+        let points: Vec<_> = analysis
+            .scope_trace
+            .iter()
+            .map(|frame| {
+                let mid = (frame[0] + frame[1]) * std::f32::consts::FRAC_1_SQRT_2;
+                let side = (frame[1] - frame[0]) * std::f32::consts::FRAC_1_SQRT_2;
+                egui::pos2(center.x + side * gain, center.y - mid * gain)
+            })
+            .collect();
+        painter.add(egui::Shape::line(
+            points.clone(),
+            Stroke::new(5.0, theme::VIOLET.gamma_multiply(0.12)),
+        ));
+        painter.add(egui::Shape::line(
+            points.clone(),
+            Stroke::new(1.35, theme::CYAN.gamma_multiply(0.92)),
+        ));
+        if let Some(endpoint) = points.last() {
+            painter.circle_filled(*endpoint, 3.2, theme::AMBER);
+        }
+    } else {
+        painter.circle_stroke(
+            center,
+            4.0,
+            Stroke::new(1.0, theme::CYAN.gamma_multiply(0.45)),
+        );
+    }
+}
+
+fn time_domain_scope(ui: &mut egui::Ui, analysis: &AnalysisSnapshot, sample_rate: u32, size: Vec2) {
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 6.0, theme::BG);
+    painter.rect_stroke(
+        rect,
+        6.0,
+        Stroke::new(1.0, theme::GRID),
+        egui::StrokeKind::Inside,
+    );
+    let window_samples = analysis.spectrum_db.len().saturating_sub(1) * 2;
+    let window_ms = window_samples as f32 / sample_rate.max(1) as f32 * 1_000.0;
+    painter.text(
+        rect.left_top() + egui::vec2(8.0, 6.0),
+        egui::Align2::LEFT_TOP,
+        format!("TIME DOMAIN  ·  {window_ms:.1} ms WINDOW"),
+        FontId::monospace(9.0),
+        theme::MUTED,
+    );
+    painter.text(
+        rect.right_top() + egui::vec2(-8.0, 6.0),
+        egui::Align2::RIGHT_TOP,
+        "L  /  R",
+        FontId::monospace(9.0),
+        theme::CYAN,
+    );
+
+    let plot = Rect::from_min_max(
+        rect.min + egui::vec2(10.0, 27.0),
+        rect.max - egui::vec2(10.0, 15.0),
+    );
+    for division in 0..=8 {
+        let x = egui::lerp(plot.x_range(), division as f32 / 8.0);
+        painter.line_segment(
+            [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
+            Stroke::new(0.7, theme::GRID.gamma_multiply(0.72)),
+        );
+    }
+    for value in [-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
+        let y = plot.center().y - value * plot.height() * 0.47;
+        painter.line_segment(
+            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+            Stroke::new(
+                if value == 0.0 { 1.1 } else { 0.7 },
+                if value == 0.0 {
+                    theme::MUTED.gamma_multiply(0.62)
+                } else {
+                    theme::GRID.gamma_multiply(0.72)
+                },
+            ),
+        );
+    }
+
+    if analysis.scope_trace.len() > 1 {
+        let peak = analysis
+            .scope_trace
+            .iter()
+            .flat_map(|frame| frame.iter())
+            .map(|sample| sample.abs())
+            .fold(0.0_f32, f32::max)
+            .max(0.08);
+        let display_peak = peak.max(0.12);
+        let gain = 0.47 / display_peak;
+        let channel_points = |channel: usize| {
+            analysis
+                .scope_trace
+                .iter()
+                .enumerate()
+                .map(|(index, frame)| {
+                    let t = index as f32 / (analysis.scope_trace.len() - 1) as f32;
+                    egui::pos2(
+                        egui::lerp(plot.x_range(), t),
+                        plot.center().y - frame[channel] * gain * plot.height(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let left = channel_points(0);
+        let right = channel_points(1);
+        painter.add(egui::Shape::line(
+            left.clone(),
+            Stroke::new(4.0, theme::CYAN.gamma_multiply(0.09)),
+        ));
+        painter.add(egui::Shape::line(
+            right.clone(),
+            Stroke::new(4.0, theme::VIOLET.gamma_multiply(0.09)),
+        ));
+        painter.add(egui::Shape::line(
+            left,
+            Stroke::new(1.15, theme::CYAN.gamma_multiply(0.94)),
+        ));
+        painter.add(egui::Shape::line(
+            right,
+            Stroke::new(1.15, theme::VIOLET.gamma_multiply(0.94)),
+        ));
+        painter.text(
+            rect.right_bottom() - egui::vec2(8.0, 4.0),
+            egui::Align2::RIGHT_BOTTOM,
+            format!("AUTO ×{:.1}", 1.0 / display_peak),
+            FontId::monospace(8.0),
+            theme::AMBER,
+        );
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct SpatialMetrics {
+    width_percent: f32,
+    balance_db: f32,
+    crest_db: f32,
+    rotation: f32,
+    anti_phase_risk: f32,
+}
+
+fn spatial_metrics(analysis: &AnalysisSnapshot, history: &VecDeque<f32>) -> SpatialMetrics {
+    let mut left_energy = 0.0_f64;
+    let mut right_energy = 0.0_f64;
+    let mut mid_energy = 0.0_f64;
+    let mut side_energy = 0.0_f64;
+    let mut peak = 0.0_f32;
+    let mut rotation = 0.0_f64;
+    let mut orbit_energy = 0.0_f64;
+    let mut previous: Option<(f64, f64)> = None;
+
+    for frame in &analysis.scope_trace {
+        let left = f64::from(frame[0]);
+        let right = f64::from(frame[1]);
+        let mid = (left + right) * std::f64::consts::FRAC_1_SQRT_2;
+        let side = (right - left) * std::f64::consts::FRAC_1_SQRT_2;
+        left_energy += left * left;
+        right_energy += right * right;
+        mid_energy += mid * mid;
+        side_energy += side * side;
+        peak = peak.max(frame[0].abs()).max(frame[1].abs());
+        if let Some((previous_side, previous_mid)) = previous {
+            rotation += previous_side * mid - previous_mid * side;
+            orbit_energy += previous_side.abs() * mid.abs() + previous_mid.abs() * side.abs();
+        }
+        previous = Some((side, mid));
+    }
+
+    let count = analysis.scope_trace.len().max(1) as f64;
+    let mid_rms = (mid_energy / count).sqrt();
+    let side_rms = (side_energy / count).sqrt();
+    let stereo_rms = ((left_energy + right_energy) / (count * 2.0)).sqrt();
+    let anti_phase_risk = if history.is_empty() {
+        0.0
+    } else {
+        history.iter().filter(|value| **value < 0.0).count() as f32 / history.len() as f32 * 100.0
+    };
+
+    SpatialMetrics {
+        width_percent: (side_rms / (mid_rms + side_rms + 1.0e-12) * 100.0) as f32,
+        balance_db: (10.0 * ((left_energy + 1.0e-12) / (right_energy + 1.0e-12)).log10())
+            .clamp(-24.0, 24.0) as f32,
+        crest_db: (20.0 * (f64::from(peak) / (stereo_rms + 1.0e-12)).log10()).clamp(0.0, 36.0)
+            as f32,
+        rotation: (rotation / (orbit_energy + 1.0e-12)).clamp(-1.0, 1.0) as f32,
+        anti_phase_risk,
+    }
+}
+
+fn spatial_correlometer(
+    ui: &mut egui::Ui,
+    analysis: &AnalysisSnapshot,
+    history: &VecDeque<f32>,
+    size: Vec2,
+) {
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 6.0, theme::BG);
+    painter.rect_stroke(
+        rect,
+        6.0,
+        Stroke::new(1.0, theme::GRID),
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        rect.left_top() + egui::vec2(8.0, 6.0),
+        egui::Align2::LEFT_TOP,
+        "PHASE CORRELOMETER  ·  3 s MEMORY",
+        FontId::monospace(9.0),
+        theme::MUTED,
+    );
+
+    let history_rect = Rect::from_min_max(
+        rect.min + egui::vec2(28.0, 28.0),
+        egui::pos2(rect.right() - 10.0, rect.top() + rect.height() * 0.50),
+    );
+    for (value, label) in [(1.0_f32, "+1"), (0.0, "0"), (-1.0, "−1")] {
+        let y = history_rect.center().y - value * history_rect.height() * 0.48;
+        painter.line_segment(
+            [
+                egui::pos2(history_rect.left(), y),
+                egui::pos2(history_rect.right(), y),
+            ],
+            Stroke::new(
+                if value == 0.0 { 1.2 } else { 0.7 },
+                if value == 0.0 {
+                    theme::RED.gamma_multiply(0.45)
+                } else {
+                    theme::GRID
+                },
+            ),
+        );
+        painter.text(
+            egui::pos2(history_rect.left() - 5.0, y),
+            egui::Align2::RIGHT_CENTER,
+            label,
+            FontId::monospace(8.0),
+            theme::MUTED,
+        );
+    }
+    if history.len() > 1 {
+        let points: Vec<_> = history
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let t = index as f32 / (history.len() - 1) as f32;
+                egui::pos2(
+                    egui::lerp(history_rect.x_range(), t),
+                    history_rect.center().y - value.clamp(-1.0, 1.0) * history_rect.height() * 0.48,
+                )
+            })
+            .collect();
+        painter.add(egui::Shape::line(
+            points,
+            Stroke::new(
+                1.6,
+                if analysis.stereo_correlation < 0.0 {
+                    theme::RED
+                } else {
+                    theme::VIOLET
+                },
+            ),
+        ));
+    }
+
+    let bar = Rect::from_min_max(
+        egui::pos2(history_rect.left(), history_rect.bottom() + 8.0),
+        egui::pos2(history_rect.right(), history_rect.bottom() + 24.0),
+    );
+    painter.rect_filled(bar, 3.0, theme::PANEL_RAISED);
+    let center_x = bar.center().x;
+    painter.line_segment(
+        [
+            egui::pos2(center_x, bar.top()),
+            egui::pos2(center_x, bar.bottom()),
+        ],
+        Stroke::new(1.0, theme::GRID),
+    );
+    let current_x = center_x + analysis.stereo_correlation.clamp(-1.0, 1.0) * bar.width() * 0.48;
+    painter.circle_filled(
+        egui::pos2(current_x, bar.center().y),
+        4.5,
+        if analysis.stereo_correlation < 0.0 {
+            theme::RED
+        } else {
+            theme::CYAN
+        },
+    );
+
+    let metrics = spatial_metrics(analysis, history);
+    let cards_top = bar.bottom() + 9.0;
+    let card_gap = 5.0;
+    let card_width = (rect.width() - 16.0 - card_gap * 4.0) / 5.0;
+    let card_height = (rect.bottom() - cards_top - 7.0).max(30.0);
+    let balance = if metrics.balance_db > 0.2 {
+        format!("L {:.1}", metrics.balance_db.abs())
+    } else if metrics.balance_db < -0.2 {
+        format!("R {:.1}", metrics.balance_db.abs())
+    } else {
+        "CENTER".into()
+    };
+    let orbit = if metrics.rotation > 0.04 {
+        format!("CW {:.2}", metrics.rotation.abs())
+    } else if metrics.rotation < -0.04 {
+        format!("CCW {:.2}", metrics.rotation.abs())
+    } else {
+        "STILL".into()
+    };
+    let values = [
+        (
+            "WIDTH",
+            format!("{:.0}%", metrics.width_percent),
+            theme::CYAN,
+        ),
+        ("BALANCE", balance, theme::TEXT),
+        ("ORBIT", orbit, theme::VIOLET),
+        (
+            "ANTI-RISK",
+            format!("{:.0}%", metrics.anti_phase_risk),
+            if metrics.anti_phase_risk > 20.0 {
+                theme::RED
+            } else {
+                theme::AMBER
+            },
+        ),
+        ("CREST", format!("{:.1} dB", metrics.crest_db), theme::AMBER),
+    ];
+    for (index, (label, value, color)) in values.into_iter().enumerate() {
+        let left = rect.left() + 8.0 + index as f32 * (card_width + card_gap);
+        metric_card(
+            &painter,
+            Rect::from_min_size(
+                egui::pos2(left, cards_top),
+                egui::vec2(card_width, card_height),
+            ),
+            label,
+            &value,
+            color,
+        );
+    }
+}
+
+fn metric_card(painter: &egui::Painter, rect: Rect, label: &str, value: &str, color: Color32) {
+    painter.rect_filled(rect, 4.0, theme::PANEL_RAISED);
+    painter.text(
+        egui::pos2(rect.center().x, rect.top() + 6.0),
+        egui::Align2::CENTER_TOP,
+        label,
+        FontId::monospace(7.5),
+        theme::MUTED,
+    );
+    painter.text(
+        egui::pos2(rect.center().x, rect.center().y + 5.0),
+        egui::Align2::CENTER_CENTER,
+        value,
+        FontId::monospace(9.5),
+        color,
     );
 }
 
@@ -1350,47 +1784,6 @@ fn level_meter(ui: &mut egui::Ui, label: &str, peak: f32, rms: f32, height: f32)
         label,
         FontId::monospace(11.0),
         theme::MUTED,
-    );
-}
-
-fn correlation_meter(ui: &mut egui::Ui, correlation: f32, height: f32) {
-    let (outer, _) = ui.allocate_exact_size(egui::vec2(58.0, height), Sense::hover());
-    let rect = Rect::from_center_size(
-        egui::pos2(outer.center().x, outer.center().y),
-        egui::vec2(58.0, 18.0),
-    );
-    ui.painter().text(
-        egui::pos2(outer.center().x, outer.top()),
-        egui::Align2::CENTER_TOP,
-        "CORR",
-        FontId::monospace(9.0),
-        theme::MUTED,
-    );
-    ui.painter().rect_filled(rect, 4.0, theme::BG);
-    let center = rect.center().x;
-    let x = center + correlation.clamp(-1.0, 1.0) * rect.width() * 0.48;
-    ui.painter().line_segment(
-        [
-            egui::pos2(center, rect.top()),
-            egui::pos2(center, rect.bottom()),
-        ],
-        Stroke::new(1.0, theme::GRID),
-    );
-    ui.painter().circle_filled(
-        egui::pos2(x, rect.center().y),
-        5.0,
-        if correlation < 0.0 {
-            theme::RED
-        } else {
-            theme::CYAN
-        },
-    );
-    ui.painter().text(
-        egui::pos2(outer.center().x, outer.bottom()),
-        egui::Align2::CENTER_BOTTOM,
-        format!("{correlation:+.2}"),
-        FontId::monospace(11.0),
-        theme::TEXT,
     );
 }
 

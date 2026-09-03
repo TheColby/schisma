@@ -23,8 +23,10 @@ The current vertical slice provides:
   settings, a 16-voice activity monitor, and an on-screen performance surface;
 - a typed graphical topology document with draggable modules, validated cables,
   per-voice/global boundaries, stable node IDs, JSON export, and cycle checks;
-- a colossal live 3D spectral-waterfall stage plus realtime spectrum, stereo
-  peak/RMS dBFS, momentary loudness, and correlation analysis on a worker thread;
+- a colossal live 3D spectral-waterfall stage plus a square Lissajous M/S
+  vectorscope, dual-channel time-domain oscilloscope, three-second phase
+  correlometer, stereo width/balance/orbit/anti-phase/crest diagnostics,
+  peak/RMS dBFS, and momentary loudness on a worker thread;
 - real Metal and CUDA compute kernels with runtime discovery, self-tests, and
   explicit CPU fallback. Metal is native on macOS; CUDA targets NVIDIA systems.
 
