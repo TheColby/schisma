@@ -524,7 +524,6 @@ impl SchismaApp {
     }
 
     fn performance_view(&mut self, ui: &mut egui::Ui) {
-        waterfall_spectral_background(ui, &self.waterfall_history);
         let available = ui.available_size();
         ui.allocate_ui_with_layout(available, Layout::top_down(Align::Center), |ui| {
             ui.add_space(18.0);
@@ -539,9 +538,19 @@ impl SchismaApp {
                     .size(24.0)
                     .color(theme::TEXT),
             );
-            ui.add_space(16.0);
-            morph_orb(ui, self.morph, self.pressure, self.timbre);
-            ui.add_space(20.0);
+            ui.add_space(12.0);
+            let reserved_below = if self.last_snapshot.is_some() {
+                184.0
+            } else {
+                136.0
+            };
+            let stage_height = (ui.available_height() - reserved_below).max(120.0);
+            let (waterfall_rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), stage_height),
+                Sense::hover(),
+            );
+            waterfall_spectral_background(ui, waterfall_rect, &self.waterfall_history);
+            ui.add_space(10.0);
             ui.label(
                 egui::RichText::new("CLICK KEYS TO LATCH · MPE INPUT REMAINS LIVE")
                     .small()
@@ -1136,13 +1145,20 @@ fn resample_spectrum(spectrum: &[f32]) -> Vec<f32> {
         .collect()
 }
 
-fn waterfall_spectral_background(ui: &egui::Ui, history: &VecDeque<Vec<f32>>) {
-    let rect = ui.max_rect().shrink2(egui::vec2(10.0, 8.0));
-    if rect.width() < 240.0 || rect.height() < 180.0 {
+fn waterfall_spectral_background(ui: &egui::Ui, stage_rect: Rect, history: &VecDeque<Vec<f32>>) {
+    let rect = stage_rect.shrink2(egui::vec2(10.0, 8.0));
+    if rect.width() < 240.0 || rect.height() < 96.0 {
         return;
     }
 
     let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 7.0, theme::BG.gamma_multiply(0.96));
+    painter.rect_stroke(
+        rect,
+        7.0,
+        Stroke::new(1.0, theme::GRID.gamma_multiply(0.75)),
+        egui::StrokeKind::Inside,
+    );
     let horizon_y = rect.top() + rect.height() * 0.13;
     let front_y = rect.bottom() - 18.0;
     let center_x = rect.center().x;
@@ -1234,42 +1250,6 @@ fn waterfall_spectral_background(ui: &egui::Ui, history: &VecDeque<Vec<f32>>) {
         "LIVE 3D WATERFALL  /  4096 FFT  /  2.7 s",
         FontId::monospace(9.0),
         Color32::from_rgba_unmultiplied(theme::CYAN.r(), theme::CYAN.g(), theme::CYAN.b(), 94),
-    );
-}
-
-fn morph_orb(ui: &mut egui::Ui, morph: f32, pressure: f32, timbre: f32) {
-    let size = ui
-        .available_width()
-        .min(330.0)
-        .min(ui.available_height() * 0.44)
-        .max(150.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), Sense::hover());
-    let painter = ui.painter();
-    let center = rect.center();
-    for ring in (1..=12).rev() {
-        let t = ring as f32 / 12.0;
-        let color = theme::VIOLET
-            .lerp_to_gamma(theme::CYAN, morph)
-            .gamma_multiply((1.0 - t) * 0.16 + 0.025);
-        painter.circle_filled(center, size * 0.46 * t, color);
-    }
-    let core = 28.0 + 32.0 * pressure;
-    painter.circle_filled(
-        center,
-        core,
-        theme::VIOLET.lerp_to_gamma(theme::CYAN, morph),
-    );
-    painter.circle_stroke(
-        center,
-        size * (0.28 + timbre * 0.12),
-        Stroke::new(2.0, theme::AMBER.gamma_multiply(0.8)),
-    );
-    painter.text(
-        center,
-        egui::Align2::CENTER_CENTER,
-        format!("{:02}%", (morph * 100.0).round()),
-        FontId::monospace(20.0),
-        theme::BG,
     );
 }
 
